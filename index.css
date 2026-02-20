@@ -1,0 +1,40 @@
+/* Prevenir el zoom al hacer click en inputs en dispositivos móviles */
+input, select, textarea {
+    font-size: 16px !important;
+}
+
+/* Ocultar pantallas inactivas por defecto */
+.screen {
+    display: none !important;
+}
+
+/* Mostrar la pantalla activa con Flexbox para mantener consistencia en Tailwind */
+.screen.active {
+    display: flex !important;
+}
+
+/* Evitar el resaltado azul en botones al tocar la pantalla en móviles */
+button, input, select {
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Animaciones suaves generales */
+.transition {
+    transition: all 0.2s ease-in-out;
+}
+
+/* Estilo para SweetAlert adaptado a pantallas móviles - botones más grandes */
+.swal2-actions {
+    flex-wrap: wrap !important;
+    gap: 10px;
+}
+.swal2-styled {
+    font-size: 1.25rem !important; /* Texto grande para botones de modales */
+    padding: 12px 24px !important;
+    border-radius: 12px !important;
+    min-width: 140px;
+}
+
+.swal2-popup {
+    border-radius: 20px !important;
+}
