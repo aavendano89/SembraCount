@@ -5,33 +5,38 @@ const app = {
         ubicacion: null,
         inventario: [] // Estructura: array de objetos { sku: string, qty: number }
     },
-    
-    init: function() {
+    html5Qrcode: null,
+    isScanning: false,
+
+    init: function () {
         this.bindEvents();
         this.loadState();
         this.updateNetworkStatus();
-        
+
         // Listeners para detectar conexión online/offline
         window.addEventListener('online', () => this.updateNetworkStatus());
         window.addEventListener('offline', () => this.updateNetworkStatus());
 
         // Si hay un estado previo cargado (ej. refrescar sesión), ir a resumen directamente si hay datos
-        if(this.state.operario && this.state.bodega) {
+        if (this.state.operario && this.state.bodega) {
             document.getElementById('label-bodega').innerText = this.state.bodega;
             document.getElementById('label-ubicacion').innerText = this.state.ubicacion;
             this.navigate('screen-scan');
         }
     },
 
-    bindEvents: function() {
+    bindEvents: function () {
         document.getElementById('btn-login').addEventListener('click', () => this.handleLogin());
-        
+
         const skuInput = document.getElementById('input-sku');
         skuInput.addEventListener('keypress', (e) => {
-            if(e.key === 'Enter') {
+            if (e.key === 'Enter') {
                 this.handleScan(skuInput.value);
             }
         });
+
+        // Cámara
+        document.getElementById('btn-camera-scan').addEventListener('click', () => this.toggleCameraScan());
 
         // Ingreso Manual
         document.getElementById('btn-manual-entry').addEventListener('click', () => {
@@ -48,7 +53,7 @@ const app = {
                     autocorrect: 'off'
                 }
             }).then((result) => {
-                if(result.isConfirmed && result.value) {
+                if (result.isConfirmed && result.value) {
                     this.handleScan(result.value);
                 }
             });
@@ -64,7 +69,7 @@ const app = {
                 confirmButtonText: 'Imprimir',
                 confirmButtonColor: '#eab308' // Yellow
             }).then((result) => {
-                if(result.isConfirmed && result.value) {
+                if (result.isConfirmed && result.value) {
                     this.printZPL(result.value);
                 }
             })
@@ -77,44 +82,49 @@ const app = {
     },
 
     // Cargar y guardar en localStorage
-    loadState: function() {
+    loadState: function () {
         const saved = localStorage.getItem('sembraCount_state');
         if (saved) {
             this.state = JSON.parse(saved);
         }
     },
 
-    saveState: function() {
+    saveState: function () {
         localStorage.setItem('sembraCount_state', JSON.stringify(this.state));
         this.updateSummaryBadge();
     },
 
     // UI: Actualizar indicador de red
-    updateNetworkStatus: function() {
+    updateNetworkStatus: function () {
         const indicator = document.getElementById('connection-status');
         const warning = document.getElementById('label-offline-warning');
-        if(navigator.onLine) {
+        if (navigator.onLine) {
             indicator.classList.replace('bg-red-500', 'bg-green-400');
-            if(warning) warning.classList.add('hidden');
+            if (warning) warning.classList.add('hidden');
         } else {
             indicator.classList.replace('bg-green-400', 'bg-red-500');
-            if(warning) warning.classList.remove('hidden');
+            if (warning) warning.classList.remove('hidden');
         }
     },
 
     // UI: Navegación simple entre secciones
-    navigate: function(screenId) {
+    navigate: function (screenId) {
         document.querySelectorAll('.screen, .screen-auth').forEach(s => {
             s.classList.remove('active');
             s.classList.add('hidden');
         });
-        
+
         const target = document.getElementById(screenId);
         target.classList.remove('hidden');
         target.classList.add('active');
 
+        // Detener cámara si salimos de la pantalla de escaneo
+        if (screenId !== 'screen-scan' && this.isScanning) {
+            this.toggleCameraScan();
+        }
+
         // Acciones específicas al abir ciertas pantallas
-        if(screenId === 'screen-scan') {
+        if (screenId === 'screen-scan') {
             document.getElementById('input-sku').focus();
             this.updateSummaryBadge();
         } else if (screenId === 'screen-summary') {
@@ -124,12 +134,12 @@ const app = {
         }
     },
 
-    handleLogin: function() {
+    handleLogin: function () {
         const pin = document.getElementById('input-pin').value;
         const bodega = document.getElementById('select-bodega').value;
         const ubi = document.getElementById('select-ubicacion').value;
 
-        if(!pin || !bodega || !ubi) {
+        if (!pin || !bodega || !ubi) {
             Swal.fire('Error', 'Debe ingresar PIN, Bodega y Ubicación.', 'error');
             return;
         }
@@ -145,14 +155,56 @@ const app = {
         this.navigate('screen-scan');
     },
 
-    handleScan: async function(rawSku) {
-        if(!rawSku) return;
+    toggleCameraScan: function () {
+        const readerDiv = document.getElementById('reader');
+        const btnCamera = document.getElementById('btn-camera-scan');
+
+        if (this.isScanning) {
+            this.html5Qrcode.stop().then(() => {
+                readerDiv.classList.add('hidden');
+                this.isScanning = false;
+                btnCamera.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg> Escanear con Cámara`;
+                btnCamera.classList.replace('bg-red-100', 'bg-blue-100');
+                btnCamera.classList.replace('text-red-800', 'text-blue-800');
+            }).catch(err => console.log('Error deteniendo escáner', err));
+        } else {
+            readerDiv.classList.remove('hidden');
+            if (!this.html5Qrcode) {
+                this.html5Qrcode = new Html5Qrcode("reader");
+            }
+
+            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+            this.html5Qrcode.start(
+                { facingMode: "environment" },
+                config,
+                (decodedText) => {
+                    this.toggleCameraScan(); // Detener al escanear exitosamente
+                    this.handleScan(decodedText);
+                },
+                (errorMessage) => {
+                    // Ignorar errores de no encontrar QR/barcode en el frame actual
+                }
+            ).then(() => {
+                this.isScanning = true;
+                btnCamera.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg> Detener Cámara`;
+                btnCamera.classList.replace('bg-blue-100', 'bg-red-100');
+                btnCamera.classList.replace('text-blue-800', 'text-red-800');
+            }).catch(err => {
+                Swal.fire('Error de cámara', 'No se pudo acceder a la cámara. Recuerda aceptarlo o estar en HTTPS (o localhost).', 'error');
+                readerDiv.classList.add('hidden');
+            });
+        }
+    },
+
+    handleScan: async function (rawSku) {
+        if (!rawSku) return;
         const sku = rawSku.trim().toUpperCase();
         document.getElementById('input-sku').value = '';
 
         const existingItemIndex = this.state.inventario.findIndex(i => i.sku === sku);
 
-        if(existingItemIndex > -1) {
+        if (existingItemIndex > -1) {
             // Lógica de Duplicados
             const { value: action } = await Swal.fire({
                 title: 'Producto ya contado',
@@ -173,8 +225,8 @@ const app = {
                     this.state.inventario[existingItemIndex].qty += qty;
                     this.saveState();
                     Swal.fire({
-                        title: 'Actualizado', 
-                        text: `Cantidad sumada. Nuevo total: ${this.state.inventario[existingItemIndex].qty}`, 
+                        title: 'Actualizado',
+                        text: `Cantidad sumada. Nuevo total: ${this.state.inventario[existingItemIndex].qty}`,
                         icon: 'success', timer: 1500, showConfirmButton: false
                     });
                 });
@@ -184,8 +236,8 @@ const app = {
                     this.state.inventario[existingItemIndex].qty = qty;
                     this.saveState();
                     Swal.fire({
-                        title: 'Actualizado', 
-                        text: `Nueva cantidad establecida: ${this.state.inventario[existingItemIndex].qty}`, 
+                        title: 'Actualizado',
+                        text: `Nueva cantidad establecida: ${this.state.inventario[existingItemIndex].qty}`,
                         icon: 'success', timer: 1500, showConfirmButton: false
                     });
                 });
@@ -196,7 +248,7 @@ const app = {
                 // Agregar al inicio del array para que aparezca arriba en la tabla
                 this.state.inventario.unshift({ sku, qty });
                 this.saveState();
-                
+
                 Swal.fire({
                     title: 'Agregado Correctamente',
                     text: `${qty}x unidades de ${sku}`,
@@ -206,12 +258,12 @@ const app = {
                 });
             });
         }
-        
+
         document.getElementById('input-sku').focus();
     },
 
     // Modal con teclado tipo número grande para elegir cantidades
-    promptQuantity: function(sku, callback) {
+    promptQuantity: function (sku, callback) {
         Swal.fire({
             title: `Cantidad para ${sku}`,
             input: 'number',
@@ -227,29 +279,29 @@ const app = {
             confirmButtonColor: '#22c55e',
             cancelButtonText: 'Cancelar'
         }).then((result) => {
-            if(result.isConfirmed && result.value) {
+            if (result.isConfirmed && result.value) {
                 const q = parseInt(result.value, 10);
-                if(q > 0) callback(q);
+                if (q > 0) callback(q);
             } else {
                 document.getElementById('input-sku').focus();
             }
         });
     },
 
-    updateSummaryBadge: function() {
+    updateSummaryBadge: function () {
         const badge = document.getElementById('badge-count');
-        if(badge) {
+        if (badge) {
             const totalItems = this.state.inventario.length;
             const totalQty = this.state.inventario.reduce((acc, curr) => acc + curr.qty, 0);
             badge.innerText = `${totalItems} items (${totalQty} uds)`;
         }
     },
 
-    renderSummaryTable: function() {
+    renderSummaryTable: function () {
         const tbody = document.getElementById('table-body-summary');
         tbody.innerHTML = '';
 
-        if(this.state.inventario.length === 0) {
+        if (this.state.inventario.length === 0) {
             tbody.innerHTML = `<tr><td colspan="3" class="p-6 text-center text-gray-500">No hay productos contados.</td></tr>`;
             return;
         }
@@ -270,7 +322,7 @@ const app = {
         });
     },
 
-    editRow: function(index) {
+    editRow: function (index) {
         const item = this.state.inventario[index];
         this.promptQuantity(item.sku, (qty) => {
             this.state.inventario[index].qty = qty;
@@ -279,7 +331,7 @@ const app = {
         });
     },
 
-    deleteRow: function(index) {
+    deleteRow: function (index) {
         Swal.fire({
             title: '¿Eliminar fila?',
             text: `Seguro que deseas eliminar el registro de ${this.state.inventario[index].sku}?`,
@@ -297,13 +349,13 @@ const app = {
         });
     },
 
-    printZPL: function(sku) {
+    printZPL: function (sku) {
         // En un caso real, esto enviaría un fetch o WebBluetooth al servidor de print/impresora
         console.log(`[ZPL COMAND] ^XA^FO50,50^ADN,36,20^FD${sku}^FS^XZ`);
         Swal.fire('ZPL Enviado', `Comando de impresión para la etiqueta del producto ${sku} enviado a la impresora de la bodega.`, 'info');
     },
 
-    generatePDF: function() {
+    generatePDF: function () {
         // Usa jsPDF desde window.jspdf
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
@@ -312,7 +364,7 @@ const app = {
         doc.setFontSize(22);
         doc.setTextColor(37, 99, 235); // azul Tailwind
         doc.text('SembraCount - Reporte de Inventario', 14, 22);
-        
+
         doc.setFontSize(12);
         doc.setTextColor(50, 50, 50);
         doc.text(`Fecha: ${new Date().toLocaleString()}`, 14, 32);
@@ -339,7 +391,7 @@ const app = {
         // Áreas de firma
         const finalY = doc.lastAutoTable.finalY || 65;
         const spaceForSign = 40;
-        
+
         // Checkear si hay espacio para firmas, si no añadir página
         if (finalY + spaceForSign > doc.internal.pageSize.height) {
             doc.addPage();
@@ -349,7 +401,7 @@ const app = {
 
         doc.setDrawColor(0);
         doc.setLineWidth(0.5);
-        
+
         doc.line(20, signY, 80, signY); // Linea firma 1
         doc.text('Firma del Operario', 30, signY + 6);
 
@@ -359,11 +411,11 @@ const app = {
         // Guardado PDF
         const filename = `Reporte_${this.state.bodega}_${new Date().getTime()}.pdf`;
         doc.save(filename);
-        
+
         Swal.fire('PDF Generado', `El documento ${filename} ha sido guardado exitosamente.`, 'success');
     },
 
-    syncSAP: async function() {
+    syncSAP: async function () {
         if (!navigator.onLine) {
             Swal.fire({
                 title: 'Conexión Estática',
@@ -420,9 +472,9 @@ const app = {
              const resultData = await response.json();
             =============================================================================
              */
-            
+
             // Simular el retraso de red
-            await new Promise(r => setTimeout(r, 2000)); 
+            await new Promise(r => setTimeout(r, 2000));
 
             Swal.fire({
                 title: '¡Sincronización Exitosa!',
@@ -434,11 +486,11 @@ const app = {
                 this.state.inventario = [];
                 this.state.operario = null;
                 this.saveState();
-                
+
                 // Limpiar selects del DOM
                 document.getElementById('select-bodega').value = '';
                 document.getElementById('select-ubicacion').value = '';
-                
+
                 this.navigate('screen-login');
             });
 
